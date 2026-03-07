@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+
+# Local configs and secrets
+.env
+.env.*
+credentials.json
+
+# Editors
+.vscode/
+.idea/

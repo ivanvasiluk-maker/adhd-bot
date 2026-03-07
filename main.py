@@ -1,5 +1,9 @@
 import asyncio
+import json
 import logging
+import os
+import tempfile
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional
 
@@ -52,12 +56,39 @@ log = logging.getLogger("adhd_bot")
 # =========================
 # GOOGLE SHEETS (optional)
 # =========================
+@contextmanager
+def _temp_credentials_file(creds_json: str):
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    try:
+        tmp.write(creds_json)
+        tmp.close()
+        yield tmp.name
+    finally:
+        try:
+            os.remove(tmp.name)
+        except OSError:
+            pass
+
+
 def init_sheet() -> Optional[object]:
     if not ENABLE_SHEETS:
         return None
+
+    creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    sheet_id = os.getenv("GOOGLE_SHEET_ID", GOOGLE_SHEET_ID)
+
     try:
-        gc = gspread.service_account(filename=GOOGLE_CREDENTIALS_FILE)
-        sh = gc.open_by_key(GOOGLE_SHEET_ID)
+        if creds_json:
+            json.loads(creds_json)
+            with _temp_credentials_file(creds_json) as temp_path:
+                gc = gspread.service_account(filename=temp_path)
+        else:
+            gc = gspread.service_account(filename=GOOGLE_CREDENTIALS_FILE)
+
+        if not sheet_id:
+            raise RuntimeError("GOOGLE_SHEET_ID is not set")
+
+        sh = gc.open_by_key(sheet_id)
         ws = sh.worksheet(SHEET_TAB_NAME) if SHEET_TAB_NAME else sh.sheet1
         return ws
     except Exception:
@@ -1013,7 +1044,7 @@ async def finalize_lead_submission(
     )
 
     try:
-        await bot.send_message(ADMIN_CHAT_ID, admin_text)
+        await bot.send_message(ADMIN_CHAT_ID, admin_text, parse_mode=None)
     except Exception:
         log.exception("admin send failed")
 

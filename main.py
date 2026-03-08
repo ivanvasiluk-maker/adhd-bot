@@ -288,7 +288,69 @@ RECOGNITION_TEXT = (
     "это не слабость.\n\n"
     "Это особенность работы внимания.\n\n"
     "Это снимает стыд → повышает покупку.\n\n"
-    "Знакомо?"
+    "Знакомо? Жмите «Дальше» — расскажу, как мы работаем."
+)
+
+HOST_INTRO_TEXT = (
+    "Кстати, представлюсь.\n\n"
+    "Меня зовут Иван Василюк.\n"
+    "Я психолог и работаю с прокрастинацией и СДВГ у взрослых.\n\n"
+    "Через группы и консультации\n"
+    "уже прошли более 50 человек.\n\n"
+    "Этот бот — выжимка техник,\n"
+    "которые мы тренируем на программе.\n\n"
+    "Они помогают запускать задачи\n"
+    "без постоянного давления на себя.\n"
+)
+
+PROGRAM_INSIDE_TEXT = (
+    "Что происходит на программе:\n\n"
+    "8 недель  \n"
+    "1 встреча в неделю\n\n"
+    "Мы тренируем навыки:\n\n"
+    "• микро-старт задач  \n"
+    "• управление вниманием  \n"
+    "• как не срываться после отката  \n"
+    "• body doubling (групповой запуск задач)  \n"
+    "• снижение самокритики  \n\n"
+    "Каждую неделю:\n\n"
+    "— онлайн встреча  \n"
+    "— конкретные навыки  \n"
+    "— маленькие задания  \n"
+    "— поддержка в чате\n"
+)
+
+SOCIAL_PROOF_TEXT = (
+    "Отзыв участника прошлой группы:\n\n"
+    "«Я годами откладывал даже простые задачи.\n\n"
+    "Знал, что нужно делать,\n"
+    "но не мог начать.\n\n"
+    "Через несколько недель\n"
+    "я начал запускать задачи намного быстрее.\n\n"
+    "Самое важное —\n"
+    "стало намного меньше самокритики».\n"
+)
+
+SELF_ASSESSMENT_TEXT = (
+    "Если честно: по шкале от 1 до 10 —\n"
+    "насколько прокрастинация сейчас мешает вашей жизни?\n\n"
+    "Если больше 6 — вы точно не один.\n"
+    "И с этим можно работать системно."
+)
+
+OFFER_TEXT = (
+    "Я собираю небольшую группу\n"
+    "тренинга навыков для взрослых с СДВГ.\n\n"
+    "Обычно люди приходят,\n"
+    "когда уже устали\n"
+    "от бесконечного «потом».\n\n"
+    "Формат:\n\n"
+    "8 недель  \n"
+    "1 встреча в неделю  \n"
+    "маленькие задания  \n"
+    "поддержка\n\n"
+    "240 € за всю программу\n"
+    "(30 € в неделю)\n"
 )
 
 STRONG_SCREEN_TEXT = (
@@ -438,6 +500,27 @@ def kb_recognition() -> types.InlineKeyboardMarkup:
     return b.as_markup()
 
 
+def kb_intro_next() -> types.InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="Дальше", callback_data="intro:next")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def kb_program_ack() -> types.InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="Понятно", callback_data="intro:program")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def kb_program_show() -> types.InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="Показать программу", callback_data="intro:show")
+    b.adjust(1)
+    return b.as_markup()
+
+
 def kb_skill_actions() -> types.InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="✅ Сделал", callback_data="skill:done")
@@ -508,6 +591,15 @@ def kb_call_or_next() -> types.InlineKeyboardMarkup:
 def kb_offer_next() -> types.InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="🚀 Посмотреть программу", callback_data="offer:next")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def kb_offer_primary() -> types.InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🚀 Посмотреть программу", callback_data="offer:next")
+    b.button(text="✍ Записаться", callback_data="cta:join")
+    b.button(text="❓ Задать вопрос", callback_data="cta:ask")
     b.adjust(1)
     return b.as_markup()
 
@@ -601,7 +693,26 @@ async def on_skill_microstart(call: types.CallbackQuery, state: FSMContext):
 async def on_skill_done(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
     cancel_skill_timer(call.message.chat.id)
-    await call.message.answer(RECOGNITION_TEXT, reply_markup=kb_recognition())
+    await call.message.answer(RECOGNITION_TEXT)
+    await call.message.answer(HOST_INTRO_TEXT, reply_markup=kb_intro_next())
+
+
+@router.callback_query(F.data == "intro:next")
+async def on_intro_next(call: types.CallbackQuery, state: FSMContext):
+    await call.answer()
+    await call.message.answer(PROGRAM_INSIDE_TEXT, reply_markup=kb_program_ack())
+
+
+@router.callback_query(F.data == "intro:program")
+async def on_intro_program(call: types.CallbackQuery, state: FSMContext):
+    await call.answer()
+    await call.message.answer(SOCIAL_PROOF_TEXT, reply_markup=kb_program_show())
+
+
+@router.callback_query(F.data == "intro:show")
+async def on_intro_show(call: types.CallbackQuery, state: FSMContext):
+    await call.answer()
+    await send_offer(call.message, state)
 
 
 async def send_test_result(message: types.Message, state: FSMContext):
@@ -630,19 +741,8 @@ async def send_offer(message: types.Message, state: FSMContext):
     await state.update_data(offer_sent=True, offer_actions_shown=False)
     await message.answer_photo(photo=FSInputFile("image/2th.png"))
     await message.answer(PITCH_TEXT)
-    await message.answer(
-        "Основной формат — групповой тренинг.\n\n"
-        "8 недель\n"
-        "24 навыка\n"
-        "1 встреча в неделю\n"
-        "домашки + поддержка\n\n"
-        "240 € за всю программу\n"
-        "(30 € в неделю)\n\n"
-        "Я беру небольшую группу,\n"
-        "чтобы можно было\n"
-        "разбирать реальные ситуации.\n\n"
-        "Обычно это 10–12 человек."
-    )
+    await message.answer(SELF_ASSESSMENT_TEXT)
+    await message.answer(OFFER_TEXT, reply_markup=kb_offer_primary())
 
     await message.answer(
         "Есть также:\n"
@@ -650,11 +750,6 @@ async def send_offer(message: types.Message, state: FSMContext):
         "— индивидуальный\n\n"
         "Выберите формат ниже — отправлю детали и как записаться.",
         reply_markup=kb_formats(),
-    )
-
-    await message.answer(
-        "Готовы — жмите «🚀 Посмотреть программу» покажу, как попасть.",
-        reply_markup=kb_offer_next(),
     )
 
 

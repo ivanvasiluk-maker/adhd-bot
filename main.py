@@ -71,6 +71,7 @@ def _temp_credentials_file(creds_json: str):
 
 
 def init_sheet() -> Optional[object]:
+    global sheet_events
     if not ENABLE_SHEETS:
         return None
 
@@ -90,10 +91,42 @@ def init_sheet() -> Optional[object]:
 
         sh = gc.open_by_key(sheet_id)
         ws = sh.worksheet(SHEET_TAB_NAME) if SHEET_TAB_NAME else sh.sheet1
+
+        try:
+            sheet_events = sh.worksheet("events")
+        except Exception:
+            try:
+                sheet_events = sh.add_worksheet(title="events", rows="1000", cols="5")
+            except Exception:
+                log.exception("Events sheet init failed")
+                sheet_events = None
+
         return ws
     except Exception:
         log.exception("Sheets init failed, disabling sheets")
         return None
+
+
+sheet_events: Optional[object] = None
+
+
+def log_event(user_id, username, event, value=""):
+    try:
+        if sheet_events is None:
+            return
+
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        sheet_events.append_row([
+            ts,
+            str(user_id),
+            username or "",
+            event,
+            value
+        ])
+
+    except Exception as e:
+        print(f"event log failed: {e}")
 
 
 sheet = init_sheet()
@@ -638,6 +671,7 @@ class Lead(StatesGroup):
 @router.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
     await state.clear()
+    log_event(message.from_user.id, message.from_user.username, "start")
     await message.answer(TEST_INTRO_TEXT, reply_markup=kb_start_test())
     await message.answer_photo(photo=FSInputFile("image/1th.png"))
 
@@ -645,6 +679,7 @@ async def start(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "test:start")
 async def on_test_start(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
+    log_event(call.from_user.id, call.from_user.username, "test_started")
     await state.set_state(Lead.test_q1)
     await call.message.answer(TEST_Q1, reply_markup=kb_test_q1())
     await call.answer()
@@ -720,6 +755,8 @@ async def send_test_result(message: types.Message, state: FSMContext):
     key = data.get("selected_state", "mix")
     memo = STATE_TO_MEMO.get(key, "Ок.")
 
+    log_event(message.from_user.id, message.from_user.username, "result_shown")
+
     # Показываем тип прокрастинации сразу после теста
     memo_title = memo.split("\n", 1)[0].replace("*", "").strip()
 
@@ -739,6 +776,7 @@ async def send_test_result(message: types.Message, state: FSMContext):
 
 async def send_offer(message: types.Message, state: FSMContext):
     await state.update_data(offer_sent=True, offer_actions_shown=False)
+    log_event(message.from_user.id, message.from_user.username, "program_opened")
     await message.answer_photo(photo=FSInputFile("image/2th.png"))
     await message.answer(PITCH_TEXT)
     await message.answer(SELF_ASSESSMENT_TEXT)
@@ -914,7 +952,7 @@ async def on_ask(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(wants_call="нет", ready_to_pay="нет")
     await state.set_state(Lead.question)
     await call.message.answer(
-        "Напишите ваш вопрос одним сообщением.\n"
+        "Напишите ваш вопрос одним сообщением (если кнопка не сработала — просто отправьте текстом).\n"
         f"Если хотите сразу в личку — можно написать мне: {YOUR_TELEGRAM}",
         reply_markup=types.ReplyKeyboardRemove(),
     )
@@ -1164,6 +1202,8 @@ async def finalize_lead_submission(
             )
         except Exception:
             log.exception("sheets append failed")
+
+    log_event(message.from_user.id, message.from_user.username, "lead_submitted")
 
     # Запланировать напоминание, если контактные данные пусты
     if contact_value:

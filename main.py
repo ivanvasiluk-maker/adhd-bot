@@ -4,7 +4,7 @@ import logging
 import os
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from aiogram import Bot, Dispatcher, F, Router, types
@@ -137,6 +137,7 @@ sheet = init_sheet()
 # =========================
 skill_timers: dict[int, asyncio.Task] = {}
 lead_reminders: dict[int, asyncio.Task] = {}
+pending_users: dict[int, dict] = {}
 
 
 def cancel_skill_timer(chat_id: int) -> None:
@@ -672,6 +673,11 @@ class Lead(StatesGroup):
 async def start(message: types.Message, state: FSMContext):
     await state.clear()
     log_event(message.from_user.id, message.from_user.username, "start")
+    pending_users[message.from_user.id] = {
+        "username": message.from_user.username or "",
+        "started_at": datetime.now(),
+        "submitted": False,
+    }
     await message.answer(TEST_INTRO_TEXT, reply_markup=kb_start_test())
     await message.answer_photo(photo=FSInputFile("image/1th.png"))
 
@@ -1205,6 +1211,9 @@ async def finalize_lead_submission(
 
     log_event(message.from_user.id, message.from_user.username, "lead_submitted")
 
+    if message.from_user.id in pending_users:
+        pending_users[message.from_user.id]["submitted"] = True
+
     # Запланировать напоминание, если контактные данные пусты
     if contact_value:
         cancel_lead_reminder(message.chat.id)
@@ -1245,6 +1254,78 @@ async def cancel(message: types.Message, state: FSMContext):
 
 
 # =========================
+# REMINDERS
+# =========================
+def kb_return() -> types.InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🚀 Продолжить", callback_data="return:start")
+    b.adjust(1)
+    return b.as_markup()
+
+
+async def reminder_worker():
+    while True:
+        now = datetime.now()
+
+        for user_id, data in list(pending_users.items()):
+            if data.get("submitted"):
+                continue
+
+            started_at = data.get("started_at")
+            if not started_at:
+                continue
+
+            if not data.get("reminder_1_sent") and now - started_at > timedelta(hours=12):
+                try:
+                    await bot.send_message(
+                        user_id,
+                        "Вы начали тест на прокрастинацию, но не дошли до конца.\n\n"
+                        "Иногда это и есть сама проблема запуска 🙂\n\n"
+                        "Если хотите — можно продолжить.\n"
+                        "Это займёт меньше минуты.",
+                        reply_markup=kb_return(),
+                    )
+                    data["reminder_1_sent"] = True
+                except Exception as e:
+                    print(f"reminder1 failed: {e}")
+
+            if not data.get("reminder_2_sent") and now - started_at > timedelta(hours=48):
+                try:
+                    await bot.send_message(
+                        user_id,
+                        "Небольшое напоминание.\n\n"
+                        "Если вы часто знаете, что нужно делать,\n"
+                        "но не можете начать — это не всегда лень.\n\n"
+                        "Я сделал короткий тест,\n"
+                        "который помогает понять,\n"
+                        "что именно мешает запуску задач.\n\n"
+                        "3 вопроса.\n30 секунд.",
+                        reply_markup=kb_return(),
+                    )
+                    data["reminder_2_sent"] = True
+                except Exception as e:
+                    print(f"reminder2 failed: {e}")
+
+        await asyncio.sleep(300)
+
+
+@router.callback_query(F.data == "return:start")
+async def return_start(call: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.message.answer(
+        "Давайте продолжим.\n\n"
+        "Я покажу короткий тест — он занимает 30 секунд."
+    )
+
+    b = InlineKeyboardBuilder()
+    b.button(text="🚀 Пройти тест (30 секунд)", callback_data="test:start")
+    b.adjust(1)
+
+    await call.message.answer("Готовы?", reply_markup=b.as_markup())
+    await call.answer()
+
+
+# =========================
 # RUN
 # =========================
 async def main():
@@ -1260,6 +1341,7 @@ async def main():
         webhook_handler.register(app, path=WEBHOOK_PATH)
         setup_application(app, dp, bot=bot)
 
+        asyncio.create_task(reminder_worker())
         await bot.set_webhook(WEBHOOK_URL)
 
         runner = web.AppRunner(app)
@@ -1279,6 +1361,7 @@ async def main():
         await asyncio.Event().wait()
     else:
         # чтобы не было конфликтов webhook/polling
+        asyncio.create_task(reminder_worker())
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
 
